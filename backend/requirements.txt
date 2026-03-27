@@ -1,0 +1,18 @@
+fastapi
+uvicorn[standard]
+email-validator
+sqlalchemy
+psycopg[binary]
+requests
+pyngrok
+python-multipart
+
+# AI — LangChain + LangGraph
+langchain
+langchain-core
+langchain-openai
+langgraph
+openai
+
+# Utilities
+python-dotenv

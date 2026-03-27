@@ -947,3 +947,7 @@ HEARTBEAT [Sync Task]: Starting sync for 2 accounts.
 --- 2026-03-27 07:53:48.036614 ---
 HEARTBEAT [Sync Task]: Starting sync for 2 accounts.
 2026-03-27 07:53:51.335020 DEBUG [IG Sync]: Discovered 28 total interactions (comments + replies) across 11 media items.
+
+--- 2026-03-27 09:36:33.210325 ---
+HEARTBEAT [Sync Task]: Starting sync for 2 accounts.
+2026-03-27 09:36:40.343545 DEBUG [IG Sync]: Discovered 28 total interactions (comments + replies) across 11 media items.

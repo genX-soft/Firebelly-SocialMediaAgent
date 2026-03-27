@@ -2104,10 +2104,13 @@ def posts_publish(payload: ContentPublishRequest, db: Session = Depends(get_db))
 
 @app.post("/inbox/ai-auto-reply")
 async def ai_auto_reply(payload: AiSuggestRequest, db: Session = Depends(get_db)):
-    result = generate_ai_reply(
+    result = generate_reply(
         message=payload.message,
         platform=payload.platform,
-        sender_name=payload.sender_name or "there",
+        interaction_type=payload.interaction_type,
+        customer_id=payload.external_id,
+        customer_name=payload.sender_name,
+        restaurant_id=RESTAURANT_ID,
     )
     suggested = result["reply"]
 

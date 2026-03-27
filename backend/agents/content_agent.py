@@ -1,7 +1,7 @@
 """
 agents/content_agent.py
 ------------------------
-LangGraph-powered content generation agent for Firebelly Social.
+LangGraph-powered content generation agent for AutoSocial.
 
 Three modes:
   A (idea)    — owner describes what they want
@@ -18,6 +18,8 @@ Graph flow:
   pick_content_strategy
         ↓
   generate_captions  (IG + FB separately)
+        ↓
+  generate_image  (DALL-E, skipped if user provided image)
         ↓
   generate_hashtags
         ↓
@@ -107,6 +109,15 @@ def _get_season() -> str:
     return "Festive season — celebratory meals, family gatherings."
 
 
+def _format_datetime(iso_str: str) -> str:
+    """Format ISO datetime string to human-readable format."""
+    try:
+        dt = datetime.fromisoformat(iso_str)
+        return dt.strftime("%A, %d %b · %I:%M %p")
+    except Exception:
+        return iso_str
+
+
 # ── Graph State ───────────────────────────────────────────────────────────────
 
 class ContentState(TypedDict):
@@ -116,6 +127,7 @@ class ContentState(TypedDict):
     owner_idea: Optional[str]
     image_url: Optional[str]
     language: str
+    user_provided_image: bool          # True if user uploaded an image (skip generation)
 
     # Loaded context
     restaurant_context: str
@@ -141,6 +153,8 @@ class ContentState(TypedDict):
     hashtags_discovery: list
     suggested_time: str
     suggested_time_reason: str
+    generated_image_url: Optional[str]
+    image_prompt: Optional[str]
 
 
 # ── Node 1: Load restaurant context ──────────────────────────────────────────
@@ -258,9 +272,9 @@ LABEL: [short label like "Lamb Chops Spotlight" or "Sunday Brunch Vibes"]
 
     return {
         **state,
-        "chosen_pillar":       pillar,
-        "chosen_dish":         parsed.get("DISH_OR_THEME"),
-        "content_angle":       parsed.get("ANGLE", ""),
+        "chosen_pillar":        pillar,
+        "chosen_dish":          parsed.get("DISH_OR_THEME"),
+        "content_angle":        parsed.get("ANGLE", ""),
         "content_pillar_label": parsed.get("LABEL", pillar.replace("_", " ").title()),
     }
 
@@ -331,6 +345,92 @@ RESTAURANT INFO:
     }
 
 
+# ── Node 5b: Generate image (LLM prompt → DALL-E 3) ──────────────────────────
+
+def generate_image(state: ContentState) -> ContentState:
+    """
+    LLM writes a rich DALL-E prompt using the full restaurant context +
+    content strategy, then DALL-E 3 generates the image.
+    Skipped entirely if the user already provided an image.
+    """
+
+    # Skip if user uploaded their own image
+    if state.get("user_provided_image"):
+        print("INFO [Image Gen]: User provided image — skipping generation.")
+        return {**state, "generated_image_url": None, "image_prompt": None}
+
+    # ── Step 1: LLM writes the DALL-E prompt ─────────────────────────────────
+    try:
+        prompt_result = llm_precise.invoke([
+            SystemMessage(content=f"""You are the visual director for {state['restaurant_name']}'s social media team.
+You write detailed, cinematic image generation prompts for DALL-E 3.
+
+Your prompts result in stunning, professional food and restaurant photography that stops the scroll.
+
+RESTAURANT CONTEXT:
+{state['restaurant_context']}
+
+TODAY: {state['day_context']}
+SEASON: {state['season_context']}
+UPCOMING OCCASIONS: {', '.join(state.get('upcoming_occasions', [])) or 'None'}
+"""),
+            HumanMessage(content=f"""Write a DALL-E 3 prompt for this post:
+
+Content pillar: {state['chosen_pillar']}
+Dish / subject: {state.get('chosen_dish', 'signature dish')}
+Creative angle: {state.get('content_angle', '')}
+Post theme: {state['content_pillar_label']}
+Caption mood (Instagram): {state.get('caption_instagram', '')[:200]}
+
+Instructions:
+- Describe the exact dish, plating style, garnishes, colours, textures
+- Specify lighting (golden hour, warm tungsten, soft diffused, candle, etc.)
+- Specify camera angle (overhead flat-lay, 45-degree hero shot, macro close-up, etc.)
+- Describe the background and table setting to match the restaurant's brand
+- Include seasonal and occasion cues if relevant
+- Match the mood of the caption above
+- End EVERY prompt with this exact sentence: "No text overlays, no watermarks, no people, photorealistic DSLR food photography."
+- Output ONLY the prompt text, nothing else, no preamble, no labels"""),
+        ])
+
+        dalle_prompt = prompt_result.content.strip()
+        print(f"INFO [Image Gen]: DALL-E prompt generated ({len(dalle_prompt)} chars)")
+
+    except Exception as e:
+        print(f"WARNING [Image Gen]: Prompt generation failed: {e}")
+        return {**state, "generated_image_url": None, "image_prompt": None}
+
+    # ── Step 2: DALL-E 3 generates the image ─────────────────────────────────
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+        response = client.images.generate(
+            model="dall-e-3",
+            prompt=dalle_prompt,
+            size="1024x1024",
+            quality="standard",
+            n=1,
+        )
+        generated_url = response.data[0].url
+        print(f"INFO [Image Gen]: Image generated successfully → {generated_url[:60]}...")
+
+        return {
+            **state,
+            "generated_image_url": generated_url,
+            "image_prompt":        dalle_prompt,
+        }
+
+    except Exception as e:
+        print(f"WARNING [Image Gen]: DALL-E generation failed: {e}")
+        # Return the prompt even if image failed — useful for debugging
+        return {
+            **state,
+            "generated_image_url": None,
+            "image_prompt":        dalle_prompt,
+        }
+
+
 # ── Node 6: Generate hashtags ─────────────────────────────────────────────────
 
 def generate_hashtags(state: ContentState) -> ContentState:
@@ -371,17 +471,17 @@ def suggest_posting_time(state: ContentState) -> ContentState:
     pillar = state["chosen_pillar"]
 
     schedule = {
-        "food":             {"Monday": "12:00", "Tuesday": "13:00", "Wednesday": "12:30", "Thursday": "18:00", "Friday": "17:00", "Saturday": "10:30", "Sunday": "10:00"},
-        "experience":       {"Monday": "19:00", "Tuesday": "19:30", "Wednesday": "18:30", "Thursday": "18:00", "Friday": "16:00", "Saturday": "14:00", "Sunday": "17:00"},
-        "offers":           {"Monday": "10:00", "Tuesday": "11:00", "Wednesday": "10:00", "Thursday": "09:30", "Friday": "10:00", "Saturday": "09:00", "Sunday": "08:30"},
-        "behind_the_scenes":{"Monday": "12:00", "Tuesday": "14:00", "Wednesday": "13:00", "Thursday": "15:00", "Friday": "11:00", "Saturday": "11:00", "Sunday": "14:00"},
+        "food":              {"Monday": "12:00", "Tuesday": "13:00", "Wednesday": "12:30", "Thursday": "18:00", "Friday": "17:00", "Saturday": "10:30", "Sunday": "10:00"},
+        "experience":        {"Monday": "19:00", "Tuesday": "19:30", "Wednesday": "18:30", "Thursday": "18:00", "Friday": "16:00", "Saturday": "14:00", "Sunday": "17:00"},
+        "offers":            {"Monday": "10:00", "Tuesday": "11:00", "Wednesday": "10:00", "Thursday": "09:30", "Friday": "10:00", "Saturday": "09:00", "Sunday": "08:30"},
+        "behind_the_scenes": {"Monday": "12:00", "Tuesday": "14:00", "Wednesday": "13:00", "Thursday": "15:00", "Friday": "11:00", "Saturday": "11:00", "Sunday": "14:00"},
     }
 
     reasons = {
-        "food":             {"Monday": "Lunch hour inspiration", "Tuesday": "Post-lunch scroll", "Wednesday": "Mid-week food mood", "Thursday": "Pre-weekend dinner planning", "Friday": "Weekend dinner excitement", "Saturday": "Brunch and lunch planning", "Sunday": "Sunday brunch prime time"},
-        "experience":       {"Monday": "Evening aspirational scroll", "Tuesday": "Evening relaxation", "Wednesday": "Weekend planning begins", "Thursday": "Weekend anticipation peak", "Friday": "TGIF — highest engagement", "Saturday": "Weekend afternoon peak", "Sunday": "Sunday evening reflection"},
-        "offers":           {"Monday": "Week planning window", "Tuesday": "Mid-morning discovery", "Wednesday": "Hump day value posts", "Thursday": "Pre-weekend planning", "Friday": "Friday morning reach peak", "Saturday": "Early decision window", "Sunday": "Brunch decision time"},
-        "behind_the_scenes":{"Monday": "Lunchtime curiosity", "Tuesday": "Afternoon engagement", "Wednesday": "Mid-week discovery", "Thursday": "Afternoon scroll", "Friday": "Friday morning high reach", "Saturday": "Weekend morning engagement", "Sunday": "Sunday afternoon"},
+        "food":              {"Monday": "Lunch hour inspiration", "Tuesday": "Post-lunch scroll", "Wednesday": "Mid-week food mood", "Thursday": "Pre-weekend dinner planning", "Friday": "Weekend dinner excitement", "Saturday": "Brunch and lunch planning", "Sunday": "Sunday brunch prime time"},
+        "experience":        {"Monday": "Evening aspirational scroll", "Tuesday": "Evening relaxation", "Wednesday": "Weekend planning begins", "Thursday": "Weekend anticipation peak", "Friday": "TGIF — highest engagement", "Saturday": "Weekend afternoon peak", "Sunday": "Sunday evening reflection"},
+        "offers":            {"Monday": "Week planning window", "Tuesday": "Mid-morning discovery", "Wednesday": "Hump day value posts", "Thursday": "Pre-weekend planning", "Friday": "Friday morning reach peak", "Saturday": "Early decision window", "Sunday": "Brunch decision time"},
+        "behind_the_scenes": {"Monday": "Lunchtime curiosity", "Tuesday": "Afternoon engagement", "Wednesday": "Mid-week discovery", "Thursday": "Afternoon scroll", "Friday": "Friday morning high reach", "Saturday": "Weekend morning engagement", "Sunday": "Sunday afternoon"},
     }
 
     pillar_schedule = schedule.get(pillar, schedule["food"])
@@ -412,6 +512,7 @@ def build_content_graph():
     g.add_node("analyse_image",           analyse_image)
     g.add_node("pick_content_strategy",   pick_content_strategy)
     g.add_node("generate_captions",       generate_captions)
+    g.add_node("generate_image",          generate_image)       # NEW
     g.add_node("generate_hashtags",       generate_hashtags)
     g.add_node("suggest_posting_time",    suggest_posting_time)
 
@@ -420,7 +521,8 @@ def build_content_graph():
     g.add_edge("load_recent_posts",       "analyse_image")
     g.add_edge("analyse_image",           "pick_content_strategy")
     g.add_edge("pick_content_strategy",   "generate_captions")
-    g.add_edge("generate_captions",       "generate_hashtags")
+    g.add_edge("generate_captions",       "generate_image")     # NEW
+    g.add_edge("generate_image",          "generate_hashtags")  # NEW (was captions→hashtags)
     g.add_edge("generate_hashtags",       "suggest_posting_time")
     g.add_edge("suggest_posting_time",    END)
 
@@ -449,12 +551,16 @@ def generate_content(
     Entry point called from FastAPI.
     mode: 'idea' | 'image' | 'surprise'
     """
+    # If an image_url was passed in, user provided the image — don't generate one
+    user_provided_image = image_url is not None
+
     result = get_content_graph().invoke({
         "restaurant_id":        restaurant_id,
         "mode":                 mode,
         "owner_idea":           owner_idea,
         "image_url":            image_url,
         "language":             language,
+        "user_provided_image":  user_provided_image,
         "recent_post_topics":   [],
         "restaurant_context":   "",
         "restaurant_name":      "",
@@ -474,22 +580,41 @@ def generate_content(
         "hashtags_discovery":   [],
         "suggested_time":       "",
         "suggested_time_reason": "",
+        "generated_image_url":  None,
+        "image_prompt":         None,
     })
 
     all_tags = result["hashtags_brand"] + result["hashtags_niche"] + result["hashtags_discovery"]
 
     return {
+        # Captions
         "caption_instagram":     result["caption_instagram"],
         "caption_facebook":      result["caption_facebook"],
+
+        # Hashtags — all formats
+        "hashtags":              all_tags,                         # flat list for frontend chips
         "hashtags_brand":        result["hashtags_brand"],
         "hashtags_niche":        result["hashtags_niche"],
         "hashtags_discovery":    result["hashtags_discovery"],
         "hashtags_all":          " ".join(all_tags),
-        "suggested_time":        result["suggested_time"],
-        "suggested_time_reason": result["suggested_time_reason"],
+
+        # Schedule — nested object that frontend expects
+        "suggested_schedule": {
+            "datetime":     result["suggested_time"],
+            "datetime_str": _format_datetime(result["suggested_time"]),
+            "reason":       result["suggested_time_reason"],
+            "pillar":       result["chosen_pillar"],
+        },
+
+        # Strategy metadata
         "chosen_pillar":         result["chosen_pillar"],
         "content_pillar_label":  result["content_pillar_label"],
+        "content_theme":         result["content_pillar_label"],   # alias for frontend
         "chosen_dish":           result.get("chosen_dish"),
         "content_angle":         result.get("content_angle"),
         "image_description":     result.get("image_description"),
+
+        # Image generation
+        "generated_image_url":   result.get("generated_image_url"),
+        "image_prompt":          result.get("image_prompt"),
     }

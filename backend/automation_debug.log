@@ -927,3 +927,23 @@ HEARTBEAT [Sync Task]: Starting sync for 2 accounts.
 --- 2026-03-27 05:28:49.803432 ---
 HEARTBEAT [Sync Task]: Starting sync for 2 accounts.
 2026-03-27 05:28:53.411000 DEBUG [IG Sync]: Discovered 28 total interactions (comments + replies) across 11 media items.
+
+--- 2026-03-27 07:35:36.217090 ---
+HEARTBEAT [Sync Task]: Starting sync for 2 accounts.
+2026-03-27 07:35:44.028224 DEBUG [IG Sync]: Discovered 28 total interactions (comments + replies) across 11 media items.
+
+--- 2026-03-27 07:41:19.688632 ---
+HEARTBEAT [Sync Task]: Starting sync for 2 accounts.
+2026-03-27 07:41:25.502584 DEBUG [IG Sync]: Discovered 28 total interactions (comments + replies) across 11 media items.
+
+--- 2026-03-27 07:46:32.555910 ---
+HEARTBEAT [Sync Task]: Starting sync for 2 accounts.
+2026-03-27 07:46:36.185860 DEBUG [IG Sync]: Discovered 28 total interactions (comments + replies) across 11 media items.
+
+--- 2026-03-27 07:48:41.949629 ---
+HEARTBEAT [Sync Task]: Starting sync for 2 accounts.
+2026-03-27 07:48:45.133560 DEBUG [IG Sync]: Discovered 28 total interactions (comments + replies) across 11 media items.
+
+--- 2026-03-27 07:53:48.036614 ---
+HEARTBEAT [Sync Task]: Starting sync for 2 accounts.
+2026-03-27 07:53:51.335020 DEBUG [IG Sync]: Discovered 28 total interactions (comments + replies) across 11 media items.

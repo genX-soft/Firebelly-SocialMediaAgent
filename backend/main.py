@@ -2029,8 +2029,42 @@ async def content_generate(payload: ContentGenerateRequest):
         language=payload.language,
     )
     return result
- 
- 
+
+
+@app.post("/content/generate-from-image")
+async def content_generate_from_image(
+    file: UploadFile = File(...),
+    user_email: str = "",
+    platform: str = "both",
+    owner_idea: str | None = None,
+):
+    """
+    Accepts a user-uploaded image, saves it, then runs the content agent
+    in 'image' mode. The agent uses GPT-4o Vision to analyse the image
+    and writes captions based on it. No DALL-E image is generated since
+    the user already provided one.
+    """
+    # Save uploaded file to disk
+    ext = os.path.splitext(file.filename or "image.jpg")[1] or ".jpg"
+    tmp_name = f"{secrets.token_hex(8)}{ext}"
+    tmp_path = os.path.join(UPLOAD_DIR, tmp_name)
+    with open(tmp_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    # Build a publicly accessible URL for the image
+    base_url = os.getenv("API_BASE_URL", "http://localhost:8000")
+    image_url = f"{base_url}/uploads/{tmp_name}"
+
+    result = generate_content(
+        mode="image",
+        restaurant_id=RESTAURANT_ID,
+        owner_idea=owner_idea or None,
+        image_url=image_url,
+        language="auto",
+    )
+    return result
+
+
 @app.post("/content/publish", response_model=PostResponse)
 def content_publish(payload: ContentPublishRequest, db: Session = Depends(get_db)):
     status = "publishing"
@@ -2060,6 +2094,12 @@ def content_publish(payload: ContentPublishRequest, db: Session = Depends(get_db
         _process_post_publishing(db, post)
  
     return _post_to_dict(post)
+
+
+# Alias — frontend ContentStudio calls /posts/publish
+@app.post("/posts/publish", response_model=PostResponse)
+def posts_publish(payload: ContentPublishRequest, db: Session = Depends(get_db)):
+    return content_publish(payload, db)
 
 
 @app.post("/inbox/ai-auto-reply")

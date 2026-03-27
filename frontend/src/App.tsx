@@ -8,6 +8,7 @@ import PostComposer from './pages/PostComposer'
 import Inbox from './pages/Inbox'
 import OAuthCallback from './pages/OAuthCallback'
 import Dashboard from './pages/Dashboard'
+import ContentStudio from './pages/ContentStudio'
 import './App.css'
 
 function App() {
@@ -22,6 +23,7 @@ function App() {
         <Route path="/composer" element={<PostComposer />} />
         <Route path="/inbox" element={<Inbox />} />
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/content-studio" element={<ContentStudio />} />
         <Route path="/oauth/callback" element={<OAuthCallback />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

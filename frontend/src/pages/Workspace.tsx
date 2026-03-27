@@ -204,6 +204,10 @@ function Workspace() {
           <div className="avatar">WS</div>
           <div className="sidebar-text">Workspace</div>
         </Link>
+        <Link to="/content-studio" className="sidebar-item">
+          <div className="avatar">✦</div>
+          <div className="sidebar-text">Content Studio</div>
+        </Link>
         <Link to="/inbox" className="sidebar-item">
           <div className="avatar">IN</div>
           <div className="sidebar-text">Engagement Inbox</div>

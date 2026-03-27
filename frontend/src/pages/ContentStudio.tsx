@@ -7,13 +7,21 @@ type Platform = 'instagram' | 'facebook' | 'both'
 type Mode = 'surprise' | 'idea_only' | 'image_idea'
 
 type GeneratedContent = {
-  caption: string
   caption_instagram: string
   caption_facebook: string
-  hashtags: string[]
-  content_theme: string
-  content_pillar: string
+  hashtags: string[]                  // flat combined list
+  hashtags_brand: string[]
+  hashtags_niche: string[]
+  hashtags_discovery: string[]
+  content_theme: string               // alias for content_pillar_label
+  content_pillar: string              // same as chosen_pillar
+  content_pillar_label: string
+  chosen_pillar: string
+  chosen_dish: string | null
+  content_angle: string
   image_description?: string
+  generated_image_url?: string        // DALL-E generated image URL
+  image_prompt?: string               // the LLM-written DALL-E prompt
   suggested_schedule: {
     datetime: string
     datetime_str: string
@@ -41,6 +49,7 @@ function ContentStudio() {
   const [activeTab, setActiveTab] = useState<'instagram' | 'facebook'>('instagram')
   const [scheduling, setScheduling] = useState(false)
   const [scheduled, setScheduled] = useState(false)
+  const [showImagePrompt, setShowImagePrompt] = useState(false)
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -56,6 +65,7 @@ function ContentStudio() {
     setError('')
     setResult(null)
     setScheduled(false)
+    setShowImagePrompt(false)
 
     try {
       let response: Response
@@ -68,11 +78,14 @@ function ContentStudio() {
         formData.append('platform', platform)
         if (ownerIdea) formData.append('owner_idea', ownerIdea)
 
-        response = await fetch(`${API_BASE}/content/generate-from-image?user_email=${encodeURIComponent(email)}&platform=${platform}${ownerIdea ? `&owner_idea=${encodeURIComponent(ownerIdea)}` : ''}`, {
-          method: 'POST',
-          headers: { 'ngrok-skip-browser-warning': 'true' },
-          body: formData,
-        })
+        response = await fetch(
+          `${API_BASE}/content/generate-from-image?user_email=${encodeURIComponent(email)}&platform=${platform}${ownerIdea ? `&owner_idea=${encodeURIComponent(ownerIdea)}` : ''}`,
+          {
+            method: 'POST',
+            headers: { 'ngrok-skip-browser-warning': 'true' },
+            body: formData,
+          }
+        )
       } else {
         response = await fetch(`${API_BASE}/content/generate`, {
           method: 'POST',
@@ -83,7 +96,7 @@ function ContentStudio() {
           body: JSON.stringify({
             user_email: email,
             platform,
-            mode,
+            mode: mode === 'idea_only' ? 'idea' : 'surprise',
             owner_idea: ownerIdea || null,
           }),
         })
@@ -108,11 +121,10 @@ function ContentStudio() {
     setScheduling(true)
     setError('')
     try {
-      const caption = editedCaption
       const hashtagStr = editedHashtags.join(' ')
-      const fullCaption = `${caption}\n\n${hashtagStr}`
+      const fullCaption = `${editedCaption}\n\n${hashtagStr}`
 
-      const res = await fetch(`${API_BASE}/posts/publish`, {
+      const res = await fetch(`${API_BASE}/content/publish`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -122,6 +134,8 @@ function ContentStudio() {
           user_email: email,
           caption: fullCaption,
           hashtags: hashtagStr,
+          media_url: result.generated_image_url || null,
+          media_type: 'image',
           targets: platform === 'both' ? ['facebook', 'instagram'] : [platform],
           scheduled_at: result.suggested_schedule?.datetime || null,
         }),
@@ -141,13 +155,16 @@ function ContentStudio() {
   }
 
   const pillarEmoji: Record<string, string> = {
-    signature_dish: '🔥',
-    experience: '✨',
-    sunday_brunch: '🥂',
+    food:              '🍽️',
+    experience:        '✨',
+    offers:            '🥂',
     behind_the_scenes: '👨‍🍳',
-    seasonal_special: '🌿',
-    customer_love: '❤️',
-    event_announcement: '🎉',
+    // legacy keys
+    signature_dish:    '🔥',
+    sunday_brunch:     '🥂',
+    seasonal_special:  '🌿',
+    customer_love:     '❤️',
+    event_announcement:'🎉',
   }
 
   return (
@@ -172,7 +189,9 @@ function ContentStudio() {
         </Link>
         <div style={{ marginTop: 'auto', padding: '20px', borderTop: '1px solid var(--dark-border)' }}>
           <div style={{ paddingBottom: '12px', fontSize: '13px', color: 'var(--muted)' }}>{email}</div>
-          <button className="ghost-dark" style={{ width: '100%', textAlign: 'left', color: '#ff6b6b', padding: '10px', background: 'transparent', border: 'none', cursor: 'pointer' }}
+          <button
+            className="ghost-dark"
+            style={{ width: '100%', textAlign: 'left', color: '#ff6b6b', padding: '10px', background: 'transparent', border: 'none', cursor: 'pointer' }}
             onClick={() => { localStorage.removeItem('autosocial_email'); navigate('/login') }}>
             Log out
           </button>
@@ -209,8 +228,8 @@ function ContentStudio() {
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   {[
-                    { value: 'surprise', label: '✦ Surprise me', desc: 'AI picks the best content for today' },
-                    { value: 'idea_only', label: '💬 I have an idea', desc: 'Describe what you want to post' },
+                    { value: 'surprise',   label: '✦ Surprise me',    desc: 'AI picks the best content for today + generates image' },
+                    { value: 'idea_only',  label: '💬 I have an idea', desc: 'Describe what you want — AI writes copy + generates image' },
                     { value: 'image_idea', label: '📸 I have an image', desc: 'Upload a photo, AI writes the copy' },
                   ].map(opt => (
                     <button key={opt.value}
@@ -290,7 +309,8 @@ function ContentStudio() {
               )}
 
               {/* Generate button */}
-              <button className="btn-primary"
+              <button
+                className="btn-primary"
                 style={{ width: '100%', padding: '16px', fontSize: '15px', fontWeight: 600, borderRadius: '12px', opacity: generating ? 0.7 : 1 }}
                 disabled={generating || (mode === 'image_idea' && !imageFile && !ownerIdea)}
                 onClick={handleGenerate}>
@@ -321,7 +341,11 @@ function ContentStudio() {
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '400px', gap: '16px' }}>
                   <div style={{ fontSize: '40px', animation: 'pulse 1.5s infinite' }}>✦</div>
                   <div style={{ fontSize: '15px', color: 'var(--text-bright)' }}>Ember is crafting your content...</div>
-                  <div style={{ fontSize: '13px', color: 'var(--muted)' }}>Fetching live menu data → Writing captions → Picking hashtags</div>
+                  <div style={{ fontSize: '13px', color: 'var(--muted)' }}>
+                    {mode === 'image_idea'
+                      ? 'Analysing image → Writing captions → Picking hashtags'
+                      : 'Fetching menu data → Writing captions → Generating image → Picking hashtags'}
+                  </div>
                 </div>
               )}
 
@@ -329,20 +353,72 @@ function ContentStudio() {
                 <>
                   {/* Content theme badge */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span style={{ fontSize: '20px' }}>{pillarEmoji[result.content_pillar] || '✨'}</span>
+                    <span style={{ fontSize: '20px' }}>{pillarEmoji[result.chosen_pillar || result.content_pillar] || '✨'}</span>
                     <div>
-                      <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-bright)' }}>{result.content_theme}</div>
+                      <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-bright)' }}>
+                        {result.content_theme || result.content_pillar_label}
+                      </div>
                       <div style={{ fontSize: '12px', color: '#b48aff' }}>
-                        {result.content_pillar.replace(/_/g, ' ')}
+                        {(result.chosen_pillar || result.content_pillar || '').replace(/_/g, ' ')}
                         {result.image_description && ' · Vision analyzed'}
+                        {result.generated_image_url && ' · Image generated'}
                       </div>
                     </div>
-                    <button className="btn-secondary"
+                    <button
+                      className="btn-secondary"
                       style={{ marginLeft: 'auto', fontSize: '12px', padding: '6px 12px' }}
                       onClick={handleGenerate}>
                       ⟳ Regenerate
                     </button>
                   </div>
+
+                  {/* ── Generated image ── */}
+                  {result.generated_image_url && (
+                    <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', overflow: 'hidden' }}>
+                      <img
+                        src={result.generated_image_url}
+                        alt="AI generated post image"
+                        style={{ width: '100%', display: 'block', maxHeight: '400px', objectFit: 'cover' }}
+                      />
+                      <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                          ✦ AI-generated image · Will be attached when you schedule
+                        </span>
+                        {result.image_prompt && (
+                          <button
+                            onClick={() => setShowImagePrompt(p => !p)}
+                            style={{ fontSize: '11px', color: '#b48aff', background: 'none', border: 'none', cursor: 'pointer', padding: '0' }}>
+                            {showImagePrompt ? 'Hide prompt' : 'View prompt'}
+                          </button>
+                        )}
+                      </div>
+                      {showImagePrompt && result.image_prompt && (
+                        <div style={{ padding: '0 16px 16px' }}>
+                          <div style={{
+                            background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.06)',
+                            borderRadius: '8px', padding: '12px', fontSize: '12px',
+                            color: 'var(--muted)', lineHeight: '1.6', fontStyle: 'italic'
+                          }}>
+                            {result.image_prompt}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* User-provided image (image_idea mode) */}
+                  {mode === 'image_idea' && imagePreview && !result.generated_image_url && (
+                    <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', overflow: 'hidden' }}>
+                      <img
+                        src={imagePreview}
+                        alt="Your uploaded image"
+                        style={{ width: '100%', display: 'block', maxHeight: '300px', objectFit: 'cover' }}
+                      />
+                      <div style={{ padding: '10px 16px', fontSize: '12px', color: 'var(--muted)' }}>
+                        📸 Your uploaded image
+                      </div>
+                    </div>
+                  )}
 
                   {/* Caption editor with platform tabs */}
                   <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', overflow: 'hidden' }}>
@@ -421,14 +497,15 @@ function ContentStudio() {
                     </div>
                   ) : (
                     <div style={{ display: 'flex', gap: '12px' }}>
-                      <button className="btn-secondary" style={{ flex: 1, padding: '14px' }}
-                        onClick={() => {
-                          // Save as draft — just reset
-                          setResult(null)
-                        }}>
-                        Save as Draft
+                      <button
+                        className="btn-secondary"
+                        style={{ flex: 1, padding: '14px' }}
+                        onClick={() => setResult(null)}>
+                        Discard
                       </button>
-                      <button className="btn-primary" style={{ flex: 2, padding: '14px', fontSize: '15px', fontWeight: 600 }}
+                      <button
+                        className="btn-primary"
+                        style={{ flex: 2, padding: '14px', fontSize: '15px', fontWeight: 600 }}
                         disabled={scheduling}
                         onClick={handleSchedule}>
                         {scheduling ? 'Scheduling...' : `📅 Schedule Post`}

@@ -2,6 +2,9 @@
 __pycache__/
 *.py[codz]
 *$py.class
+venv
+social_media_mvp_features.docx
+backend\uploads
 
 # C extensions
 *.so

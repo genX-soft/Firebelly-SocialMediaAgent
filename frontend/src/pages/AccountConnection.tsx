@@ -47,10 +47,10 @@ function AccountConnection() {
 
   const [accounts, setAccounts] = useState<SocialAccount[]>([])
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle')
-  const [message, setMessage] = useState('')
+  const [_message, setMessage] = useState('')
   const [oauthStatus, setOauthStatus] = useState('')
 
-  const [platform, setPlatform] = useState<'facebook' | 'instagram'>('facebook')
+  const [platform, _setPlatform] = useState('')  
   const [externalId, setExternalId] = useState('')
   const [pageName, setPageName] = useState('')
   const [igUsername, setIgUsername] = useState('')

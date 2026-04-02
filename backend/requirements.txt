@@ -3,8 +3,9 @@ uvicorn[standard]
 email-validator
 sqlalchemy
 psycopg[binary]
+psycopg2-binary
 requests
-pyngrok
+# pyngrok
 python-multipart
 
 # AI — LangChain + LangGraph

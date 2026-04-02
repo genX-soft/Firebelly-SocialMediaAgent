@@ -7,6 +7,8 @@ social_media_mvp_features.docx
 backend\uploads
 backend\automation_debug.log
 backend\webhook_debug.log
+test.py
+backend\uploads
 # C extensions
 *.so
 

@@ -208,6 +208,22 @@ class AnalyticsSummary(BaseModel):
   engagement_over_time: list[MetricPoint] = []
   platform: str
 
+class PostInsight(BaseModel):
+  post_id: str
+  platform: str
+  fb_post_id: str | None = None
+  ig_media_id: str | None = None
+  caption: str
+  media_url: str | None = None
+  created_at: datetime
+  likes: int = 0
+  comments: int = 0
+  shares: int = 0
+  saves: int = 0
+  reach: int = 0
+  impressions: int = 0
+  status: str = ""
+
 class ContentGenerateRequest(BaseModel):
     mode: Literal["idea", "image", "surprise"]
     owner_idea: str | None = None
@@ -379,6 +395,235 @@ async def get_top_posts(user_email: EmailStr, limit: int = 5, db: Session = Depe
     .limit(limit)
   ).scalars().all()
   return [_post_to_dict(p) for p in posts]
+
+
+@app.get("/analytics/post-insights")
+async def get_post_insights(user_email: EmailStr, limit: int = 20, db: Session = Depends(get_db)):
+        """
+        Per-post metrics: likes, comments, shares, saves, reach, impressions.
+        Fetches live from Meta for published posts that have a platform ID.
+        Falls back to 0s if Meta API is unavailable (e.g. permissions pending).
+        """
+        email = user_email.lower().strip()
+        posts = db.execute(
+            select(Post).where(
+                Post.user_email == email,
+                Post.status == "published"
+            ).order_by(Post.created_at.desc()).limit(limit)
+        ).scalars().all()
+ 
+        if not posts:
+            return []
+ 
+        graph_base = _get_graph_base_url()
+        results = []
+ 
+        for post in posts:
+            insight = PostInsight(
+                post_id=post.id,
+                platform="facebook" if post.fb_post_id else "instagram" if post.ig_media_id else "unknown",
+                fb_post_id=post.fb_post_id,
+                ig_media_id=post.ig_media_id,
+                caption=post.caption[:120] + ("..." if len(post.caption) > 120 else ""),
+                media_url=post.media_url,
+                created_at=post.created_at,
+                status=post.status,
+            )
+ 
+            # Get account access token
+            platform = "facebook" if post.fb_post_id else "instagram"
+            account = db.execute(
+                select(SocialAccount).where(
+                    SocialAccount.user_email == email,
+                    SocialAccount.platform == platform,
+                    SocialAccount.is_connected == True
+                )
+            ).scalar_one_or_none()
+ 
+            if not account or not account.access_token:
+                results.append(insight)
+                continue
+ 
+            try:
+                if post.fb_post_id:
+                    # Facebook post insights
+                    data = _http_get_json(
+                        f"{graph_base}/{post.fb_post_id}",
+                        {
+                            "fields": "likes.summary(true),comments.summary(true),shares,impressions,reach",
+                            "access_token": account.access_token,
+                        }
+                    )
+                    insight.likes       = data.get("likes", {}).get("summary", {}).get("total_count", 0)
+                    insight.comments    = data.get("comments", {}).get("summary", {}).get("total_count", 0)
+                    insight.shares      = data.get("shares", {}).get("count", 0)
+                    insight.impressions = data.get("impressions", 0)
+                    insight.reach       = data.get("reach", 0)
+ 
+                elif post.ig_media_id:
+                    # Instagram media insights
+                    data = _http_get_json(
+                        f"{graph_base}/{post.ig_media_id}",
+                        {
+                            "fields": "like_count,comments_count,media_url,thumbnail_url",
+                            "access_token": account.access_token,
+                        }
+                    )
+                    insight.likes    = data.get("like_count", 0)
+                    insight.comments = data.get("comments_count", 0)
+ 
+                    # IG insights endpoint for reach/impressions/saves
+                    try:
+                        ig_ins = _http_get_json(
+                            f"{graph_base}/{post.ig_media_id}/insights",
+                            {
+                                "metric": "impressions,reach,saved",
+                                "access_token": account.access_token,
+                            }
+                        )
+                        for metric in ig_ins.get("data", []):
+                            name = metric.get("name")
+                            val  = metric.get("values", [{}])[0].get("value", 0) if metric.get("values") else metric.get("value", 0)
+                            if name == "impressions": insight.impressions = val
+                            elif name == "reach":     insight.reach       = val
+                            elif name == "saved":     insight.saves       = val
+                    except Exception:
+                        pass  # insights need extra permissions — degrade gracefully
+ 
+            except Exception as e:
+                print(f"WARNING [Post Insights]: Could not fetch for {post.id}: {e}")
+ 
+            results.append(insight)
+ 
+        return [r.model_dump() for r in results]
+ 
+
+@app.delete("/inbox/comment/{external_id}")
+def delete_comment(external_id: str, user_email: EmailStr, db: Session = Depends(get_db)):
+        """
+        Delete/hide a comment on Facebook or Instagram.
+        Facebook: permanent delete via Graph API.
+        Instagram: hidden via Graph API (Instagram doesn't support full delete).
+        """
+        email = user_email.lower().strip()
+        interaction = db.execute(
+            select(Interaction).where(
+                Interaction.external_id == external_id,
+                func.lower(Interaction.user_email) == email
+            )
+        ).scalar_one_or_none()
+ 
+        if not interaction:
+            raise HTTPException(status_code=404, detail="Comment not found")
+ 
+        account = db.execute(
+            select(SocialAccount).where(
+                SocialAccount.user_email == email,
+                SocialAccount.platform == interaction.platform,
+                SocialAccount.is_connected == True
+            )
+        ).scalar_one_or_none()
+ 
+        if not account or not account.access_token:
+            raise HTTPException(status_code=400, detail=f"No connected account for {interaction.platform}")
+ 
+        graph_base = _get_graph_base_url()
+ 
+        try:
+            if interaction.platform == "facebook":
+                # DELETE /{comment-id} permanently removes it
+                _http_post_json(
+                    f"{graph_base}/{external_id}",
+                    {"method": "delete", "access_token": account.access_token}
+                )
+            elif interaction.platform == "instagram":
+                # Instagram: hide the comment (closest to delete available via API)
+                _http_post_json(
+                    f"{graph_base}/{external_id}",
+                    {"hide": "true", "access_token": account.access_token}
+                )
+        except HTTPException as e:
+            # If Meta API fails, still remove from local DB
+            print(f"WARNING: Meta API comment delete failed: {e.detail}")
+ 
+        # Remove from local DB regardless
+        db.delete(interaction)
+        db.commit()
+ 
+        return {
+            "status": "deleted",
+            "platform": interaction.platform,
+            "note": "Removed from inbox. Instagram comments are hidden on platform (Meta API limitation)."
+            if interaction.platform == "instagram"
+            else "Permanently deleted from Facebook."
+        }
+ 
+ 
+@app.get("/analytics/account-stats")
+async def get_account_stats(user_email: EmailStr, db: Session = Depends(get_db)):
+        """
+        Live account-level stats: followers, following, total posts, profile views.
+        Fetches directly from Meta — use the Refresh button, not auto-poll.
+        """
+        email = user_email.lower().strip()
+        accounts = db.execute(
+            select(SocialAccount).where(
+                SocialAccount.user_email == email,
+                SocialAccount.is_connected == True
+            )
+        ).scalars().all()
+ 
+        if not accounts:
+            return []
+ 
+        graph_base = _get_graph_base_url()
+        results = []
+ 
+        for account in accounts:
+            stat = {
+                "platform": account.platform,
+                "name": account.page_name or account.instagram_username,
+                "profile_picture_url": account.profile_picture_url,
+                "followers": 0,
+                "following": 0,
+                "total_posts": 0,
+                "profile_views": 0,
+            }
+ 
+            if not account.access_token:
+                results.append(stat)
+                continue
+ 
+            try:
+                if account.platform == "facebook":
+                    data = _http_get_json(
+                        f"{graph_base}/{account.external_id}",
+                        {
+                            "fields": "fan_count,followers_count",
+                            "access_token": account.access_token,
+                        }
+                    )
+                    stat["followers"] = data.get("fan_count", data.get("followers_count", 0))
+ 
+                elif account.platform == "instagram":
+                    data = _http_get_json(
+                        f"{graph_base}/{account.external_id}",
+                        {
+                            "fields": "followers_count,follows_count,media_count,profile_views",
+                            "access_token": account.access_token,
+                        }
+                    )
+                    stat["followers"]     = data.get("followers_count", 0)
+                    stat["following"]     = data.get("follows_count", 0)
+                    stat["total_posts"]   = data.get("media_count", 0)
+                    stat["profile_views"] = data.get("profile_views", 0)
+ 
+            except Exception as e:
+                print(f"WARNING [Account Stats]: {account.platform}: {e}")
+ 
+            results.append(stat)
+ 
+        return results
 
 
 def _get_oauth_config(platform: str) -> dict:
@@ -563,7 +808,8 @@ async def _sync_inbox_task():
       with open("sync_heartbeat.log", "a", encoding="utf-8") as f:
         f.write(f"ERROR: {err_msg}\n")
     
-    await asyncio.sleep(300) # Sync every 5 minutes
+    # await asyncio.sleep(300) # Sync every 5 minutes
+    await asyncio.sleep(30) # Sync every 30 seconds
 
 
 async def _sync_facebook_inbox(db: Session, account: SocialAccount):

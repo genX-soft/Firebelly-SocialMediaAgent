@@ -150,6 +150,40 @@ function ContentStudio() {
     }
   }
 
+  const handlePostNow = async () => {
+    if (!result) return
+    setScheduling(true)
+    setError('')
+    try {
+      const hashtagStr = editedHashtags.join(' ')
+      const fullCaption = `${editedCaption}\n\n${hashtagStr}`
+ 
+      const res = await fetch(`${API_BASE}/content/publish`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: JSON.stringify({
+          user_email: email,
+          caption: fullCaption,
+          hashtags: hashtagStr,
+          media_url: result.generated_image_url || null,
+          media_type: 'image',
+          targets: platform === 'both' ? ['facebook', 'instagram'] : [platform],
+          scheduled_at: null,   // ← null = publish immediately
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.detail || 'Publishing failed')
+      setScheduled(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to publish')
+    } finally {
+      setScheduling(false)
+    }
+  }
+
   const removeHashtag = (tag: string) => {
     setEditedHashtags(prev => prev.filter(t => t !== tag))
   }
@@ -496,6 +530,21 @@ function ContentStudio() {
                       ✅ Post scheduled successfully!
                     </div>
                   ) : (
+                    // <div style={{ display: 'flex', gap: '12px' }}>
+                    //   <button
+                    //     className="btn-secondary"
+                    //     style={{ flex: 1, padding: '14px' }}
+                    //     onClick={() => setResult(null)}>
+                    //     Discard
+                    //   </button>
+                    //   <button
+                    //     className="btn-primary"
+                    //     style={{ flex: 2, padding: '14px', fontSize: '15px', fontWeight: 600 }}
+                    //     disabled={scheduling}
+                    //     onClick={handleSchedule}>
+                    //     {scheduling ? 'Scheduling...' : `📅 Schedule Post`}
+                    //   </button>
+                    // </div>
                     <div style={{ display: 'flex', gap: '12px' }}>
                       <button
                         className="btn-secondary"
@@ -504,11 +553,18 @@ function ContentStudio() {
                         Discard
                       </button>
                       <button
-                        className="btn-primary"
-                        style={{ flex: 2, padding: '14px', fontSize: '15px', fontWeight: 600 }}
+                        className="btn-secondary"
+                        style={{ flex: 1, padding: '14px', fontSize: '14px', fontWeight: 600 }}
                         disabled={scheduling}
                         onClick={handleSchedule}>
-                        {scheduling ? 'Scheduling...' : `📅 Schedule Post`}
+                        {scheduling ? 'Scheduling...' : '📅 Schedule'}
+                      </button>
+                      <button
+                        className="btn-primary"
+                        style={{ flex: 1, padding: '14px', fontSize: '14px', fontWeight: 600 }}
+                        disabled={scheduling}
+                        onClick={handlePostNow}>
+                        {scheduling ? 'Posting...' : '🚀 Post Now'}
                       </button>
                     </div>
                   )}

@@ -140,14 +140,26 @@ function Workspace() {
 
   const publishDraft = async (postId: string) => {
     try {
-      const res = await fetch(`${API_BASE}/posts/${postId}/publish`, { 
-        method: 'POST',
-        headers: { 'ngrok-skip-browser-warning': 'true' }
-      })
-      if (!res.ok) throw new Error('Publish failed')
+      const res = await fetch(
+        `${API_BASE}/posts/${postId}/publish?user_email=${encodeURIComponent(email)}`,
+        {
+          method: 'POST',
+          headers: { 'ngrok-skip-browser-warning': 'true' },
+        }
+      )
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        const msg = errData?.detail
+          ? typeof errData.detail === 'string'
+            ? errData.detail
+            : JSON.stringify(errData.detail)
+          : 'Publish failed'
+        alert(msg)
+        return
+      }
       await loadPosts()
-    } catch {
-      // silently fail for now; user can refresh
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to publish post')
     }
   }
 

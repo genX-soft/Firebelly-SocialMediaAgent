@@ -189,7 +189,15 @@ function PostComposer() {
         body: JSON.stringify(buildPayload()),
       })
       const data = await response.json()
-      if (!response.ok) throw new Error(data?.detail || 'Failed to save post')
+      if (!response.ok) {
+        const detail = data?.detail
+        const msg = typeof detail === 'string'
+          ? detail
+          : Array.isArray(detail)
+            ? detail.map((d: any) => d?.msg || JSON.stringify(d)).join(', ')
+            : 'Failed to save post'
+        throw new Error(msg)
+      }
       setStatus('success')
       setMessage(editId ? 'Post updated.' : `Draft saved (${data.status}).`)
       
@@ -225,12 +233,23 @@ function PostComposer() {
         })
         if (!updateRes.ok) throw new Error('Failed to update post before publishing')
         
-        const pubRes = await fetch(`${API_BASE}/posts/${editId}/publish`, { 
-          method: 'POST',
-          headers: { 'ngrok-skip-browser-warning': 'true' }
-        })
+        const pubRes = await fetch(
+          `${API_BASE}/posts/${editId}/publish?user_email=${encodeURIComponent(email)}`,
+          {
+            method: 'POST',
+            headers: { 'ngrok-skip-browser-warning': 'true' },
+          }
+        )
         const data = await pubRes.json()
-        if (!pubRes.ok) throw new Error(data?.detail || 'Failed to publish post')
+        if (!pubRes.ok) {
+          const detail = data?.detail
+          const msg = typeof detail === 'string'
+            ? detail
+            : Array.isArray(detail)
+              ? detail.map((d: any) => d?.msg || JSON.stringify(d)).join(', ')
+              : 'Failed to publish post'
+          throw new Error(msg)
+        }
         
         setStatus('success')
         setMessage(`Post published (${data.status}).`)
@@ -247,7 +266,15 @@ function PostComposer() {
           body: JSON.stringify(payload),
         })
         const data = await response.json()
-        if (!response.ok) throw new Error(data?.detail || 'Failed to publish post')
+        if (!response.ok) {
+          const detail = data?.detail
+          const msg = typeof detail === 'string'
+            ? detail
+            : Array.isArray(detail)
+              ? detail.map((d: any) => d?.msg || JSON.stringify(d)).join(', ')
+              : 'Failed to publish post'
+          throw new Error(msg)
+        }
         setStatus('success')
         setMessage(`Post published (${data.status}).`)
         setCaption('')

@@ -49,6 +49,7 @@ function ContentStudio() {
   const [activeTab, setActiveTab] = useState<'instagram' | 'facebook'>('instagram')
   const [scheduling, setScheduling] = useState(false)
   const [scheduled, setScheduled] = useState(false)
+  const [postedNow, setPostedNow] = useState(false)
   const [showImagePrompt, setShowImagePrompt] = useState(false)
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -65,6 +66,7 @@ function ContentStudio() {
     setError('')
     setResult(null)
     setScheduled(false)
+    setPostedNow(false)
     setShowImagePrompt(false)
 
     try {
@@ -176,7 +178,7 @@ function ContentStudio() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.detail || 'Publishing failed')
-      setScheduled(true)
+      setPostedNow(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to publish')
     } finally {
@@ -528,6 +530,10 @@ function ContentStudio() {
                   {scheduled ? (
                     <div className="form-message success" style={{ padding: '16px', borderRadius: '12px', textAlign: 'center', fontSize: '15px' }}>
                       ✅ Post scheduled successfully!
+                    </div>
+                  ) : postedNow ? (
+                    <div className="form-message success" style={{ padding: '16px', borderRadius: '12px', textAlign: 'center', fontSize: '15px' }}>
+                      🚀 Post published successfully!
                     </div>
                   ) : (
                     // <div style={{ display: 'flex', gap: '12px' }}>

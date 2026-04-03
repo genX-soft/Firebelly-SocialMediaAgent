@@ -683,17 +683,28 @@ def _publish_to_facebook(account: SocialAccount, post: Post) -> tuple[str | None
     if post.media_type == "image":
       endpoint = f"{graph_base}/{account.external_id}/photos"
       params["url"] = post.media_url
+      print(f"DEBUG [FB Publish]: Posting photo to {endpoint}, image={post.media_url[:60]}")
     else:
       endpoint = f"{graph_base}/{account.external_id}/videos"
       params["file_url"] = post.media_url
+      print(f"DEBUG [FB Publish]: Posting video to {endpoint}")
   else:
     endpoint = f"{graph_base}/{account.external_id}/feed"
+    print(f"DEBUG [FB Publish]: Posting text to {endpoint}")
   
   try:
     resp = _http_post_json(endpoint, params)
-    return None, resp.get("id") or resp.get("post_id")
+    post_id = resp.get("id") or resp.get("post_id")
+    print(f"DEBUG [FB Publish]: Response = {resp}, post_id = {post_id}")
+    if not post_id:
+      return f"Facebook returned no post ID. Response: {resp}", None
+    return None, post_id
   except HTTPException as exc:
+    print(f"ERROR [FB Publish]: HTTPException = {exc.detail}")
     return str(exc.detail), None
+  except Exception as exc:
+    print(f"ERROR [FB Publish]: Unexpected error = {exc}")
+    return str(exc), None
 
 
 def _publish_to_instagram(account: SocialAccount, post: Post) -> tuple[str | None, str | None]:
@@ -733,48 +744,42 @@ def _publish_to_instagram(account: SocialAccount, post: Post) -> tuple[str | Non
     return str(exc.detail), None
 
 
-
 def _mirror_to_cloudinary(image_url: str) -> str:
-    """
-    Download an image from a temporary URL (e.g. DALL-E) and re-upload
-    to Cloudinary so it stays permanently accessible by Meta.
-    Returns the Cloudinary URL, or the original URL if Cloudinary is not configured.
-    """
-    cloudinary_name   = os.getenv("CLOUDINARY_CLOUD_NAME", "")
-    cloudinary_key    = os.getenv("CLOUDINARY_API_KEY", "")
-    cloudinary_secret = os.getenv("CLOUDINARY_API_SECRET", "")
-
-    if not (cloudinary_name and cloudinary_key and cloudinary_secret):
-        return image_url  # No Cloudinary configured, return as-is
-
-    try:
-        import base64 as _b64, hashlib as _hl, time as _time
-        resp = requests.get(image_url, timeout=30)
-        resp.raise_for_status()
-        file_bytes = resp.content
-        timestamp  = str(int(_time.time()))
-        public_id  = f"autosocial/dalle_{secrets.token_hex(8)}"
-        sig_str    = f"public_id={public_id}&timestamp={timestamp}{cloudinary_secret}"
-        signature  = _hl.sha256(sig_str.encode()).hexdigest()
-        upload_resp = requests.post(
-            f"https://api.cloudinary.com/v1_1/{cloudinary_name}/image/upload",
-            data={
-                "file":      f"data:image/jpeg;base64,{_b64.b64encode(file_bytes).decode()}",
-                "public_id": public_id,
-                "timestamp": timestamp,
-                "api_key":   cloudinary_key,
-                "signature": signature,
-            },
-            timeout=30,
-        )
-        if upload_resp.status_code == 200:
-            cdn_url = upload_resp.json().get("secure_url", "")
-            if cdn_url:
-                print(f"INFO [Mirror]: DALL-E image mirrored to Cloudinary → {cdn_url[:60]}...")
-                return cdn_url
-    except Exception as e:
-        print(f"WARNING [Mirror]: Could not mirror image to Cloudinary: {e}")
+  """Download a temporary image URL and re-upload to Cloudinary for permanent storage."""
+  cloudinary_name   = os.getenv("CLOUDINARY_CLOUD_NAME", "")
+  cloudinary_key    = os.getenv("CLOUDINARY_API_KEY", "")
+  cloudinary_secret = os.getenv("CLOUDINARY_API_SECRET", "")
+  if not (cloudinary_name and cloudinary_key and cloudinary_secret):
     return image_url
+  try:
+    import base64 as _b64, hashlib as _hl, time as _time
+    resp = requests.get(image_url, timeout=30)
+    resp.raise_for_status()
+    file_bytes = resp.content
+    timestamp  = str(int(_time.time()))
+    public_id  = f"autosocial/dalle_{secrets.token_hex(8)}"
+    sig_str    = f"public_id={public_id}&timestamp={timestamp}{cloudinary_secret}"
+    signature  = _hl.sha256(sig_str.encode()).hexdigest()
+    upload_resp = requests.post(
+      f"https://api.cloudinary.com/v1_1/{cloudinary_name}/image/upload",
+      data={
+        "file":      f"data:image/jpeg;base64,{_b64.b64encode(file_bytes).decode()}",
+        "public_id": public_id,
+        "timestamp": timestamp,
+        "api_key":   cloudinary_key,
+        "signature": signature,
+      },
+      timeout=30,
+    )
+    if upload_resp.status_code == 200:
+      cdn_url = upload_resp.json().get("secure_url", "")
+      if cdn_url:
+        print(f"INFO [Mirror]: Image mirrored to Cloudinary → {cdn_url[:60]}...")
+        return cdn_url
+  except Exception as e:
+    print(f"WARNING [Mirror]: Cloudinary mirror failed: {e}")
+  return image_url
+
 
 def _process_post_publishing(db: Session, post: Post):
   if not post.targets:
@@ -2364,11 +2369,10 @@ def content_publish(payload: ContentPublishRequest, db: Session = Depends(get_db
         except Exception:
             pass
 
-    # Mirror DALL-E / temporary image URLs to Cloudinary immediately
-    # DALL-E URLs expire in ~1 hour — Cloudinary URLs are permanent
+    # Mirror temporary image URLs (DALL-E) to Cloudinary for permanent storage
     media_url = payload.media_url
-    if media_url and any(x in media_url for x in ["oaidalleapiprodscus", "openai.com", "blob.core.windows.net"]):
-        print(f"INFO [Publish]: Detected temporary image URL, mirroring to Cloudinary...")
+    if media_url and any(x in media_url for x in ["oaidalleapiprodscus", "blob.core.windows.net"]):
+        print(f"INFO [Publish]: Mirroring temporary image to Cloudinary...")
         media_url = _mirror_to_cloudinary(media_url)
 
     post = Post(

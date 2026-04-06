@@ -76,7 +76,7 @@ function Signup() {
       setEmail('')
       setPassword('')
       setCompany('')
-      navigate('/workspace')
+      navigate('/permissions-consent')
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Sign up failed'
       setStatus('error')

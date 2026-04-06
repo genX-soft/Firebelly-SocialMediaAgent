@@ -9,6 +9,7 @@ import Inbox from './pages/Inbox'
 import OAuthCallback from './pages/OAuthCallback'
 import Dashboard from './pages/Dashboard'
 import ContentStudio from './pages/ContentStudio'
+import PermissionsConsent from './pages/PermissionsConsent'
 import './App.css'
 
 function App() {
@@ -18,6 +19,7 @@ function App() {
         <Route path="/" element={<AuthHome />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
+        <Route path="/permissions-consent" element={<PermissionsConsent />} />
         <Route path="/workspace" element={<Workspace />} />
         <Route path="/accounts" element={<AccountConnection />} />
         <Route path="/composer" element={<PostComposer />} />

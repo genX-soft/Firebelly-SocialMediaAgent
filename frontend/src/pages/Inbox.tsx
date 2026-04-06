@@ -43,6 +43,8 @@ function Inbox() {
   const [sendingReply, setSendingReply] = useState(false)
   const [replyStatus, setReplyStatus] = useState<{ id: string; msg: string; type: 'success' | 'error' } | null>(null)
   const [isPolling, setIsPolling] = useState(false)
+  const [deletingComment, setDeletingComment] = useState<string | null>(null)
+  const [deleteStatus, setDeleteStatus] = useState<{ id: string; msg: string; type: 'success' | 'error' } | null>(null)
 
   // Pagination
   const [page, setPage] = useState(1)
@@ -117,6 +119,40 @@ function Inbox() {
       })
     } finally {
       setSendingReply(false)
+    }
+  }
+
+  // ── Delete Comment ──
+  const deleteComment = async (item: Interaction) => {
+    const confirmMsg = item.platform === 'instagram'
+      ? 'Hide this comment on Instagram? (Instagram only supports hiding, not full deletion via API)'
+      : 'Permanently delete this comment from Facebook?'
+    if (!window.confirm(confirmMsg)) return
+
+    setDeletingComment(item.external_id)
+    setDeleteStatus(null)
+    try {
+      const res = await fetch(
+        `${API_BASE}/inbox/comment/${item.external_id}?user_email=${encodeURIComponent(email)}`,
+        { method: 'DELETE', headers: { 'ngrok-skip-browser-warning': 'true' } }
+      )
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.detail || 'Delete failed')
+      // Remove from local state immediately
+      setInteractions(prev => prev.filter(i => i.external_id !== item.external_id))
+      setDeleteStatus({
+        id: item.external_id,
+        msg: item.platform === 'instagram' ? 'Comment hidden on Instagram.' : 'Comment deleted from Facebook.',
+        type: 'success',
+      })
+    } catch (err) {
+      setDeleteStatus({
+        id: item.external_id,
+        msg: err instanceof Error ? err.message : 'Delete failed',
+        type: 'error',
+      })
+    } finally {
+      setDeletingComment(null)
     }
   }
 
@@ -287,12 +323,45 @@ function Inbox() {
                   } else {
                     setReplyingTo(item.id)
                     setReplyContent('')
-                    // Clear AI state when manually opening
                     setAiStates(prev => ({ ...prev, [item.id]: { loading: false, suggestion: null, escalate: false, error: null, persona: null } }))
                   }
                 }}
               >
                 {isOpen ? 'Cancel' : 'Reply'}
+              </button>
+
+              {/* Delete button — comments only */}
+              {item.type === 'comment' && (
+                <button
+                  style={{
+                    fontSize: '12px', padding: '6px 10px', borderRadius: '6px', cursor: 'pointer',
+                    background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)',
+                    color: '#ef4444', transition: 'all 0.2s',
+                  }}
+                  disabled={deletingComment === item.external_id}
+                  onClick={() => deleteComment(item)}
+                  title={item.platform === 'instagram' ? 'Hide comment on Instagram' : 'Delete comment from Facebook'}
+                >
+                  {deletingComment === item.external_id ? '...' : '🗑'}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Outgoing comment — show delete only */}
+          {item.is_outgoing && item.type === 'comment' && (
+            <div className="post-actions" style={{ marginLeft: '16px' }}>
+              <button
+                style={{
+                  fontSize: '12px', padding: '6px 10px', borderRadius: '6px', cursor: 'pointer',
+                  background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)',
+                  color: '#ef4444',
+                }}
+                disabled={deletingComment === item.external_id}
+                onClick={() => deleteComment(item)}
+                title={item.platform === 'instagram' ? 'Hide comment on Instagram' : 'Delete comment from Facebook'}
+              >
+                {deletingComment === item.external_id ? '...' : '🗑'}
               </button>
             </div>
           )}
@@ -423,6 +492,16 @@ function Inbox() {
             style={{ width: '100%', marginTop: '8px', padding: '8px' }}
           >
             {replyStatus.msg}
+          </div>
+        )}
+
+        {/* Delete status */}
+        {deleteStatus?.id === item.external_id && (
+          <div
+            className={`form-message ${deleteStatus.type}`}
+            style={{ width: '100%', marginTop: '8px', padding: '8px' }}
+          >
+            {deleteStatus.msg}
           </div>
         )}
       </div>

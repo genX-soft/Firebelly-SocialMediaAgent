@@ -5,13 +5,15 @@
     "nixpacksPlan": {
       "phases": {
         "install": {
-          "cmds": ["pip install -r requirements.txt"]
+          "cmds": [
+            "/mise/installs/python/3.13.12/bin/pip install -r requirements.txt"
+          ]
         }
       }
     }
   },
   "deploy": {
-    "startCommand": "cd backend && python -m uvicorn main:app --host 0.0.0.0 --port $PORT",
+    "startCommand": "cd backend && /mise/installs/python/3.13.12/bin/python -m uvicorn main:app --host 0.0.0.0 --port $PORT",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 3
   }

@@ -76,6 +76,7 @@ function Workspace() {
   const [posts, setPosts] = useState<Post[]>([])
   const [postsLoading, setPostsLoading] = useState(false)
   const [postsError, setPostsError] = useState('')
+  const [publishingId, setPublishingId] = useState<string | null>(null)
 
   // Tabs
   const [activeTab, setActiveTab] = useState<ActiveTab>('drafts')
@@ -139,6 +140,8 @@ function Workspace() {
   }
 
   const publishDraft = async (postId: string) => {
+    if (publishingId) return  // prevent double-click
+    setPublishingId(postId)
     try {
       const res = await fetch(
         `${API_BASE}/posts/${postId}/publish?user_email=${encodeURIComponent(email)}`,
@@ -160,6 +163,8 @@ function Workspace() {
       await loadPosts()
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to publish post')
+    } finally {
+      setPublishingId(null)
     }
   }
 
@@ -413,9 +418,10 @@ function Workspace() {
                         className="btn-primary"
                         type="button"
                         onClick={() => publishDraft(post.id)}
-                        style={{ fontSize: '12px', padding: '6px 10px' }}
+                        disabled={publishingId === post.id}
+                        style={{ fontSize: '12px', padding: '6px 10px', opacity: publishingId === post.id ? 0.6 : 1 }}
                       >
-                        {post.status === 'failed' ? 'Retry' : 'Publish'}
+                        {publishingId === post.id ? 'Publishing...' : post.status === 'failed' ? 'Retry' : 'Publish'}
                       </button>
                     )}
                     <Link

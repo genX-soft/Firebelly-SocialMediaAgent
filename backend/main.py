@@ -417,84 +417,94 @@ async def get_post_insights(user_email: EmailStr, limit: int = 20, db: Session =
  
         graph_base = _get_graph_base_url()
         results = []
- 
-        for post in posts:
-            insight = PostInsight(
-                post_id=post.id,
-                platform="facebook" if post.fb_post_id else "instagram" if post.ig_media_id else "unknown",
-                fb_post_id=post.fb_post_id,
-                ig_media_id=post.ig_media_id,
-                caption=post.caption[:120] + ("..." if len(post.caption) > 120 else ""),
-                media_url=post.media_url,
-                created_at=post.created_at,
-                status=post.status,
+
+        # Pre-load accounts once
+        fb_account = db.execute(
+            select(SocialAccount).where(
+                SocialAccount.user_email == email,
+                SocialAccount.platform == "facebook",
+                SocialAccount.is_connected == True
             )
- 
-            # Get account access token
-            platform = "facebook" if post.fb_post_id else "instagram"
-            account = db.execute(
-                select(SocialAccount).where(
-                    SocialAccount.user_email == email,
-                    SocialAccount.platform == platform,
-                    SocialAccount.is_connected == True
+        ).scalar_one_or_none()
+
+        ig_account = db.execute(
+            select(SocialAccount).where(
+                SocialAccount.user_email == email,
+                SocialAccount.platform == "instagram",
+                SocialAccount.is_connected == True
+            )
+        ).scalar_one_or_none()
+
+        for post in posts:
+            # Posts published to Both get TWO rows — one per platform
+            platforms_to_fetch = []
+            if post.fb_post_id:
+                platforms_to_fetch.append("facebook")
+            if post.ig_media_id:
+                platforms_to_fetch.append("instagram")
+            if not platforms_to_fetch:
+                platforms_to_fetch.append("unknown")
+
+            for platform in platforms_to_fetch:
+                insight = PostInsight(
+                    post_id=post.id,
+                    platform=platform,
+                    fb_post_id=post.fb_post_id,
+                    ig_media_id=post.ig_media_id,
+                    caption=post.caption[:120] + ("..." if len(post.caption) > 120 else ""),
+                    media_url=post.media_url,
+                    created_at=post.created_at,
+                    status=post.status,
                 )
-            ).scalar_one_or_none()
- 
-            if not account or not account.access_token:
-                results.append(insight)
-                continue
- 
-            try:
-                if post.fb_post_id:
-                    # Facebook post insights
-                    data = _http_get_json(
-                        f"{graph_base}/{post.fb_post_id}",
-                        {
-                            "fields": "likes.summary(true),comments.summary(true),shares,impressions,reach",
-                            "access_token": account.access_token,
-                        }
-                    )
-                    insight.likes       = data.get("likes", {}).get("summary", {}).get("total_count", 0)
-                    insight.comments    = data.get("comments", {}).get("summary", {}).get("total_count", 0)
-                    insight.shares      = data.get("shares", {}).get("count", 0)
-                    insight.impressions = data.get("impressions", 0)
-                    insight.reach       = data.get("reach", 0)
- 
-                elif post.ig_media_id:
-                    # Instagram media insights
-                    data = _http_get_json(
-                        f"{graph_base}/{post.ig_media_id}",
-                        {
-                            "fields": "like_count,comments_count,media_url,thumbnail_url",
-                            "access_token": account.access_token,
-                        }
-                    )
-                    insight.likes    = data.get("like_count", 0)
-                    insight.comments = data.get("comments_count", 0)
- 
-                    # IG insights endpoint for reach/impressions/saves
-                    try:
-                        ig_ins = _http_get_json(
-                            f"{graph_base}/{post.ig_media_id}/insights",
+
+                try:
+                    if platform == "facebook" and post.fb_post_id and fb_account and fb_account.access_token:
+                        # Remove shares — not available on photo posts
+                        data = _http_get_json(
+                            f"{graph_base}/{post.fb_post_id}",
                             {
-                                "metric": "impressions,reach,saved",
-                                "access_token": account.access_token,
+                                "fields": "likes.summary(true),comments.summary(true),impressions,reach",
+                                "access_token": fb_account.access_token,
                             }
                         )
-                        for metric in ig_ins.get("data", []):
-                            name = metric.get("name")
-                            val  = metric.get("values", [{}])[0].get("value", 0) if metric.get("values") else metric.get("value", 0)
-                            if name == "impressions": insight.impressions = val
-                            elif name == "reach":     insight.reach       = val
-                            elif name == "saved":     insight.saves       = val
-                    except Exception:
-                        pass  # insights need extra permissions — degrade gracefully
- 
-            except Exception as e:
-                print(f"WARNING [Post Insights]: Could not fetch for {post.id}: {e}")
- 
-            results.append(insight)
- 
+                        insight.likes       = data.get("likes", {}).get("summary", {}).get("total_count", 0)
+                        insight.comments    = data.get("comments", {}).get("summary", {}).get("total_count", 0)
+                        insight.impressions = data.get("impressions", 0)
+                        insight.reach       = data.get("reach", 0)
+
+                    elif platform == "instagram" and post.ig_media_id and ig_account and ig_account.access_token:
+                        data = _http_get_json(
+                            f"{graph_base}/{post.ig_media_id}",
+                            {
+                                "fields": "like_count,comments_count",
+                                "access_token": ig_account.access_token,
+                            }
+                        )
+                        insight.likes    = data.get("like_count", 0)
+                        insight.comments = data.get("comments_count", 0)
+
+                        try:
+                            ig_ins = _http_get_json(
+                                f"{graph_base}/{post.ig_media_id}/insights",
+                                {
+                                    "metric": "impressions,reach,saved",
+                                    "access_token": ig_account.access_token,
+                                }
+                            )
+                            for metric in ig_ins.get("data", []):
+                                name = metric.get("name")
+                                val = metric.get("values", [{}])[0].get("value", 0) if metric.get("values") else metric.get("value", 0)
+                                if name == "impressions": insight.impressions = val
+                                elif name == "reach":     insight.reach       = val
+                                elif name == "saved":     insight.saves       = val
+                        except Exception:
+                            pass  # Needs instagram_manage_insights permission
+
+                except Exception as e:
+                    print(f"WARNING [Post Insights]: Could not fetch {platform} for {post.id}: {e}")
+
+                results.append(insight)
+
         return [r.model_dump() for r in results]
  
 
@@ -609,7 +619,7 @@ async def get_account_stats(user_email: EmailStr, db: Session = Depends(get_db))
                     data = _http_get_json(
                         f"{graph_base}/{account.external_id}",
                         {
-                            "fields": "followers_count,follows_count,media_count,profile_views",
+                            "fields": "followers_count,follows_count,media_count",
                             "access_token": account.access_token,
                         }
                     )
@@ -751,10 +761,10 @@ def _publish_to_facebook(account: SocialAccount, post: Post) -> tuple[str | None
 def _publish_to_instagram(account: SocialAccount, post: Post) -> tuple[str | None, str | None]:
   if not account.access_token:
     return "Missing access token — connect your Instagram account via OAuth first", None
-  
+
   if not post.media_url:
     return "Instagram requires media (image or video) for posts", None
-    
+
   graph_base = _get_graph_base_url()
   caption = post.caption + (f"\n\n{post.hashtags}" if post.hashtags else "")
 
@@ -770,19 +780,59 @@ def _publish_to_instagram(account: SocialAccount, post: Post) -> tuple[str | Non
       container_params["video_url"] = post.media_url
       container_params["media_type"] = "VIDEO"
 
-    container_data = _http_post_json(f"{graph_base}/{account.external_id}/media", container_params)
+    container_data = _http_post_json(
+      f"{graph_base}/{account.external_id}/media", container_params
+    )
     container_id = container_data.get("id")
     if not container_id:
       return "Failed to create Instagram media container", None
-      
-    # 2. Publish media
-    resp = _http_post_json(f"{graph_base}/{account.external_id}/media_publish", {
-      "creation_id": container_id,
-      "access_token": account.access_token,
-    })
-    return None, resp.get("id")
+
+    print(f"DEBUG [IG Publish]: Container created: {container_id}")
+
+    # 2. Poll container status until FINISHED (Meta requires this)
+    import time as _time
+    max_attempts = 10
+    for attempt in range(max_attempts):
+      status_data = _http_get_json(
+        f"{graph_base}/{container_id}",
+        {
+          "fields": "status_code,status",
+          "access_token": account.access_token,
+        }
+      )
+      status_code = status_data.get("status_code", "")
+      print(f"DEBUG [IG Publish]: Container status attempt {attempt+1}: {status_code}")
+
+      if status_code == "FINISHED":
+        break
+      elif status_code == "ERROR":
+        err_msg = status_data.get("status", "Media processing failed")
+        return f"Instagram media processing error: {err_msg}", None
+      elif status_code in ("IN_PROGRESS", "PUBLISHED"):
+        _time.sleep(3)
+      else:
+        _time.sleep(2)
+    else:
+      return "Instagram media container timed out — try again", None
+
+    # 3. Publish the container
+    resp = _http_post_json(
+      f"{graph_base}/{account.external_id}/media_publish",
+      {
+        "creation_id": container_id,
+        "access_token": account.access_token,
+      }
+    )
+    ig_id = resp.get("id")
+    print(f"DEBUG [IG Publish]: Published successfully, ig_media_id={ig_id}")
+    return None, ig_id
+
   except HTTPException as exc:
+    print(f"ERROR [IG Publish]: {exc.detail}")
     return str(exc.detail), None
+  except Exception as exc:
+    print(f"ERROR [IG Publish]: Unexpected: {exc}")
+    return str(exc), None
 
 
 def _process_post_publishing(db: Session, post: Post):
@@ -1033,7 +1083,7 @@ def _upsert_interaction(db: Session, account: SocialAccount, item_data: dict, it
   existing = db.execute(select(Interaction).where(
     Interaction.external_id == ext_id,
     Interaction.user_email == account.user_email
-  )).scalar_one_or_none()
+  )).scalars().first()  # use first() to handle duplicate rows gracefully
   
   if existing:
     with open("webhook_debug.log", "a", encoding="utf-8") as f:

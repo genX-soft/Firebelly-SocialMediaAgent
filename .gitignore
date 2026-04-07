@@ -9,6 +9,8 @@ backend\automation_debug.log
 backend\webhook_debug.log
 test.py
 backend\uploads
+backend\automation_debug.log
+E:\AutoSocial (2)\AutoSocial\backend\webhook_debug.log
 # C extensions
 *.so
 

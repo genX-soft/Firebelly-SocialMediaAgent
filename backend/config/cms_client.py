@@ -7,6 +7,8 @@ Matches the same pattern as the voice agent:
 """
 
 import os
+from dotenv import load_dotenv
+load_dotenv()
 import requests
 from functools import lru_cache
 from datetime import datetime, timedelta
@@ -14,10 +16,14 @@ import logging
 logging.basicConfig(level=logging.INFO)
 from typing import Any
 
+# # ── Config (mirrors voice agent pattern) ──────────────────────────────────────
+# API_BASE_URL = os.getenv("API_BASE_URL", "https://firbelly-ai-production-c4fb.up.railway.app/api")
+# API_KEY      = os.getenv("API_KEY",      "HpSU281XZ97YhtyXxqN67bNcynZPeZ1Xpmwq")
+# TENANT_ID    = os.getenv("TENANT_ID",    os.getenv("RESTAURANT_ID", "329aab80-82d3-42a4-a1c2-61c3efdbe081"))
 # ── Config (mirrors voice agent pattern) ──────────────────────────────────────
-API_BASE_URL = os.getenv("API_BASE_URL", "https://firbelly-ai-production-c4fb.up.railway.app/api")
-API_KEY      = os.getenv("API_KEY",      "HpSU281XZ97YhtyXxqN67bNcynZPeZ1Xpmwq")
-TENANT_ID    = os.getenv("TENANT_ID",    os.getenv("RESTAURANT_ID", "329aab80-82d3-42a4-a1c2-61c3efdbe081"))
+API_BASE_URL = os.getenv("API_BASE_URL", "")
+API_KEY      = os.getenv("API_KEY", "")
+TENANT_ID    = os.getenv("TENANT_ID", os.getenv("RESTAURANT_ID", ""))
 
 # ── Simple in-memory cache (avoids hammering CMS on every DM) ─────────────────
 _cache: dict[str, tuple[Any, datetime]] = {}

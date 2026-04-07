@@ -84,15 +84,11 @@ async def startup_event():
 
 app.add_middleware(
   CORSMiddleware,
-  allow_origins=[
-    "https://firebelly-social-media-agent-qwv5mg9n6.vercel.app",
-    "https://firebelly-social-media-agent.vercel.app",
-    "http://localhost:5173",
-    "http://localhost:3000",
-  ],
-  allow_credentials=True,
-  allow_methods=["*"],
+  allow_origins=["*"],
+  allow_credentials=False,
+  allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
   allow_headers=["*"],
+  expose_headers=["*"],
 )
 
 UPLOAD_DIR = "uploads"

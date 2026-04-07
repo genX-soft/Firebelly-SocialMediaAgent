@@ -74,10 +74,23 @@ async def startup_event():
     # Start the scheduled post worker
     asyncio.create_task(_scheduled_post_worker())
 
+# app.add_middleware(
+#   CORSMiddleware,
+#   allow_origins=["*"],
+#   allow_credentials=False,
+#   allow_methods=["*"],
+#   allow_headers=["*"],
+# )
+
 app.add_middleware(
   CORSMiddleware,
-  allow_origins=["*"],
-  allow_credentials=False,
+  allow_origins=[
+    "https://firebelly-social-media-agent-qwv5mg9n6.vercel.app",
+    "https://firebelly-social-media-agent.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:3000",
+  ],
+  allow_credentials=True,
   allow_methods=["*"],
   allow_headers=["*"],
 )

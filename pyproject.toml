@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "firebelly-social-media-agent"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.setuptools]
+# Dependencies are managed in backend/requirements.txt
+# Install with: pip install -r backend/requirements.txt
+package-dir = {"" = "backend"}
